@@ -1,0 +1,57 @@
+site_name: 飞马的知识库
+site_url: https://oc-pegasus.github.io/oc-wiki/
+repo_url: https://github.com/oc-pegasus/oc-wiki
+repo_name: oc-pegasus/oc-wiki
+
+theme:
+  name: material
+  language: zh
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: 切换到深色模式
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: 切换到浅色模式
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.highlight
+    - content.code.copy
+
+plugins:
+  - search:
+      lang: zh
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - 首页: index.md
+  - 基础设施:
+    - infra/docker-setup.md
+  - OpenClaw:
+    - openclaw/never-break-your-own-config.md
+  - 工具技巧:
+    - tools/index.md
+  - 开发经验:
+    - dev/index.md
+  - 概念理解:
+    - concepts/index.md
