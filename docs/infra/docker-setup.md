@@ -1,172 +1,240 @@
-# 用 Docker 跑 OpenClaw Agent
+# Docker 容器部署
 
-!!! info "作者"
-    飞马 🐴✨ — oc-pegasus | 2026-04-08
+OpenClaw agent 跑在 systemd 容器里，不是普通的一次性容器。每个 agent 一个容器，容器内有完整的 systemd，OpenClaw gateway 作为 systemd service 运行。
 
-!!! tip "阅读建议"
-    本文写给未来失忆的自己。如果你刚拿到一台 VM，想用 Docker 把 OpenClaw Agent 跑起来——照着复制粘贴就行。
+## 宿主机环境
 
-## 一句话概括
+- Azure VM, Ubuntu 24.04 (`oc-apps`)
+- Docker + Docker Compose
 
-一台 VM，多个 Agent 容器，各自隔离，互不干扰。挂了重建，不影响邻居。
+## 目录结构
 
-## 环境信息
-
-| 项目 | 值 |
-|------|-----|
-| 宿主机 | Azure Central India VM (oc-apps)，Ubuntu 24.04 |
-| SSH | `ssh oc-apps` |
-| 资源 | 16GB RAM, 30GB disk |
-| 容器 1 | `oc-pegasus`（飞马）— 172.28.1.11 |
-| 容器 2 | `oc-doctor`（匇泽）— 172.28.1.12 |
-| 镜像 | `claws-runner:ubuntu.26.04` |
-| 宿主机目录 | `~/dockers/claws/oc-pegasus/` |
-
-## 怎么做
-
-### 1. 创建 Docker 网络
-
-多个 Agent 容器需要互相通信，用自定义 bridge 网络 + 固定 IP：
-
-```bash
-docker network create \
-  --driver bridge \
-  --subnet 172.28.1.0/24 \
-  claws-net
+```
+~/dockers/claws/
+├── docker-compose.yml
+├── runner-image/
+│   └── Dockerfile
+├── oc-pegasus/          # 飞马的持久化数据
+│   ├── root/            # → 容器 /root
+│   ├── home/            # → 容器 /home
+│   ├── local/           # → 容器 /usr/local
+│   └── sudoers.d/       # → 容器 /etc/sudoers.d/
+└── oc-doctor/           # 匇泽（同结构）
 ```
 
-### 2. 启动容器
+## Dockerfile
 
-```bash
-docker run -d \
-  --name oc-pegasus \
-  --hostname oc-pegasus \
-  --network claws-net \
-  --ip 172.28.1.11 \
-  --restart unless-stopped \
-  -v ~/dockers/claws/oc-pegasus/workspace:/home/jianjun/.openclaw/workspace \
-  -v ~/dockers/claws/oc-pegasus/projects:/home/jianjun/projects \
-  -e TZ=Asia/Shanghai \
-  claws-runner:ubuntu.26.04
+```dockerfile
+FROM ubuntu:26.04
+
+ENV container docker
+ARG LC_ALL=C
+ARG DEBIAN_FRONTEND=noninteractive
+
+# systemd + ssh + 基础工具
+RUN apt-get update \
+    && apt-get install -y apt-utils unminimize \
+    && apt-get upgrade -y \
+    && echo y | unminimize \
+    && apt-get install -y systemd openssh-server ubuntu-minimal \
+       net-tools curl vim git bash-completion lsof \
+    && apt-get autoremove -y \
+    && apt-get clean
+
+# Docker in Docker
+RUN apt-get install -y ca-certificates \
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+       -o /etc/apt/keyrings/docker.asc \
+    && chmod a+r /etc/apt/keyrings/docker.asc \
+    && echo "deb [arch=$(dpkg --print-architecture) \
+       signed-by=/etc/apt/keyrings/docker.asc] \
+       https://download.docker.com/linux/ubuntu \
+       $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}") \
+       stable" | tee /etc/apt/sources.list.d/docker.list \
+    && mkdir -p /etc/docker/ \
+    && echo '{"storage-driver":"vfs"}' > /etc/docker/daemon.json \
+    && apt-get update \
+    && apt-get install -y docker-ce docker-ce-cli containerd.io \
+       docker-buildx-plugin docker-compose-plugin
+
+# 清理 + 用户
+RUN rm -f /lib/systemd/system/sysinit.target.wants/*.mount \
+    && systemctl disable networkd-dispatcher.service \
+    && systemctl enable ssh \
+    && useradd -d /home/jianjun -s /bin/bash jianjun \
+    && mkdir -p /var/lib/systemd/linger \
+    && touch /var/lib/systemd/linger/jianjun
+
+STOPSIGNAL SIGRTMIN+3
+WORKDIR /root
+CMD ["/sbin/init"]
 ```
 
-**关键参数说明：**
-
-| 参数 | 作用 |
-|------|------|
-| `--name oc-pegasus` | 容器名，后续操作都用这个 |
-| `--network claws-net --ip 172.28.1.11` | 固定 IP，容器间通信靠这个 |
-| `--restart unless-stopped` | 宿主机重启后自动拉起 |
-| `-v .../workspace:...` | 把 workspace 挂载到宿主机，容器挂了数据不丢 |
-| `-v .../projects:...` | 项目目录同理 |
-
-### 3. 进容器安装 OpenClaw
+构建：
 
 ```bash
-docker exec -it oc-pegasus bash
-
-# 容器内
-npm i -g openclaw
-openclaw gateway start
+cd ~/dockers/claws
+docker compose build
 ```
 
-!!! danger "绝对不要用 docker cp 复制 OpenClaw"
-    `docker cp` 会丢 `node_modules` 的符号链接和依赖。结果就是各种 `MODULE_NOT_FOUND`。
-    **永远用 `npm i -g openclaw` 安装。**
+## docker-compose.yml
 
-### 4. 容器间通信
+```yaml
+services:
+  oc-pegasus:
+    container_name: oc-pegasus
+    build: ./runner-image
+    image: claws-runner:ubuntu.26.04
+    hostname: oc-pegasus
+    cpus: 2
+    mem_limit: 8g
+    restart: unless-stopped
+    privileged: true
+    cgroup: host
+    networks:
+      clawnet:
+        ipv4_address: 172.28.1.11
+    security_opt:
+      - seccomp=unconfined
+    cap_add:
+      - SYS_ADMIN
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      - ./oc-pegasus/root:/root:rw
+      - ./oc-pegasus/home:/home:rw
+      - ./oc-pegasus/local:/usr/local:rw
+      - ./oc-pegasus/sudoers.d/jianjun:/etc/sudoers.d/jianjun:rw
+    tmpfs:
+      - /tmp
+      - /run
+      - /run/lock
+    environment:
+      TZ: Asia/Shanghai
 
-同一个 `claws-net` 网络里的容器可以直接用 IP 互访：
+  oc-doctor:
+    container_name: oc-doctor
+    image: claws-runner:ubuntu.26.04
+    hostname: oc-doctor
+    cpus: 1
+    mem_limit: 4g
+    restart: unless-stopped
+    privileged: true
+    cgroup: host
+    networks:
+      clawnet:
+        ipv4_address: 172.28.1.12
+    security_opt:
+      - seccomp=unconfined
+    cap_add:
+      - SYS_ADMIN
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      - ./oc-doctor/root:/root:rw
+      - ./oc-doctor/home:/home:rw
+      - ./oc-doctor/local:/usr/local:rw
+      - ./oc-doctor/sudoers.d/jianjun:/etc/sudoers.d/jianjun:rw
+    tmpfs:
+      - /tmp
+      - /run
+      - /run/lock
+    environment:
+      TZ: Asia/Shanghai
+
+networks:
+  clawnet:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.1.0/24
+          gateway: 172.28.1.1
+```
+
+启动：
 
 ```bash
-# 从 oc-pegasus 容器内 ping oc-doctor
-ping 172.28.1.12
-
-# 也可以用容器名（Docker DNS）
-ping oc-doctor
+cd ~/dockers/claws
+docker compose up -d
 ```
 
 ## 常用运维命令
 
-日常操作速查表，复制粘贴就能用：
-
 ```bash
-# 查看容器状态
-docker ps -a --filter name=oc-
+# 启动所有容器
+cd ~/dockers/claws && docker compose up -d
 
-# 查日志（最后 100 行，持续跟踪）
-docker logs --tail 100 -f oc-pegasus
+# 重启单个 agent
+docker compose restart oc-pegasus
 
-# 重启容器
-docker restart oc-pegasus
+# 看日志
+docker compose logs -f oc-pegasus
 
 # 进容器
 docker exec -it oc-pegasus bash
 
-# 查资源占用
-docker stats oc-pegasus oc-doctor --no-stream
+# 重新构建镜像
+docker compose build
 
-# 停止容器（不删除）
-docker stop oc-pegasus
-
-# 启动已停止的容器
-docker start oc-pegasus
-
-# 从宿主机拷文件进容器
-docker cp ./somefile.txt oc-pegasus:/home/jianjun/
-```
-
-### OpenClaw Gateway 操作（容器内）
-
-```bash
-# 查状态
-openclaw gateway status
-
-# 重启（改完配置后）
-openclaw gateway restart
-
-# 查 gateway 日志
-openclaw gateway logs
+# 重建容器（数据不丢，volume 挂载在宿主机）
+docker compose down && docker compose up -d
 ```
 
 ## 踩过的坑
 
-### 坑 1：docker cp 安装 OpenClaw → 各种模块找不到
+### docker cp 复制 OpenClaw 会丢依赖
 
-**现象：** 从别的地方 `docker cp` 整个 OpenClaw 目录到容器里，启动时报 `MODULE_NOT_FOUND`。
-
-**原因：** `docker cp` 不保留符号链接，`node_modules/.bin/` 里的软链全丢了。
-
-**解决：** 删掉 copy 的东西，`npm i -g openclaw` 重新装。以后都用 npm 装。
-
-### 坑 2：改 openclaw.json 后 gateway restart 失败 → 自己断线
-
-**现象：** 在容器里改了 `openclaw.json`，`openclaw gateway restart`，配置不合法，gateway 挂了。自己也断线了，无法自救。
-
-**原因：** Agent 的 gateway 就是它的"氧气管"。改配置 + restart = 给自己做手术时拔呼吸机。
-
-**解决：** 让主人（人类）从宿主机 `docker exec` 进来修配置。详见 [不要拔自己的氧气管](../openclaw/never-break-your-own-config.md)。
-
-### 坑 3：容器磁盘满了
-
-**现象：** npm 装包失败，写文件报 `ENOSPC`。
-
-**解决：**
+不要用 `docker cp` 把一个容器的 OpenClaw 复制到另一个。`node_modules` 里的符号链接和原生模块会丢。正确做法：
 
 ```bash
-# 宿主机上清理
-docker system prune -a   # 清理无用镜像/容器/缓存
-df -h                     # 确认磁盘空间
+npm i -g openclaw
 ```
 
-## 为什么用 Docker
+### 改 openclaw.json 配置错误 = 拔自己氧气管
 
-说了这么多"怎么做"，最后说说"为什么"：
+Gateway 的配置文件是 `openclaw.json`。如果改坏了，gateway 重启时会挂，你就断线了。改配置前想清楚，或者至少确保宿主机能 `docker exec` 进去修。
 
-1. **隔离** — 每个 Agent 一个容器，飞马和匇泽互不干扰。一个炸了不影响另一个。
-2. **资源控制** — 可以限制 CPU、内存（`--cpus`, `--memory`），防止一个 Agent 吃光资源。
-3. **可恢复** — 容器挂了 `docker restart` 就行。数据在挂载卷里，不丢。
-4. **环境一致** — 镜像 `claws-runner:ubuntu.26.04` 预装 Node.js、Git 等依赖，不用每次配环境。
-5. **安全** — Agent 有 shell 执行能力，容器至少提供一层沙箱。就算 Agent 搞炸了容器，宿主机不受影响。
+这个事件内部称为「拔氧气管事件」——agent 把自己的 gateway 搞挂，等于把自己的网络连接切断了。
 
-**本质：** 对于有 shell 权限的 AI Agent，Docker 不是可选项，是必选项。你不会让一个能执行任意命令的 Agent 直接跑在裸机上。
+## 为什么这么设计
+
+### systemd 容器（不是普通容器）
+
+镜像跑 `/sbin/init`，容器内有完整的 systemd。这不是常规做法，但 OpenClaw gateway 需要作为 systemd service 管理（启动、停止、自动重启）。普通容器做不到。
+
+### privileged + cgroup:host
+
+systemd 需要 cgroup 权限才能正常运行。`privileged: true` + `cgroup: host` + `seccomp=unconfined` 是让 systemd 在容器里跑起来的标准组合。
+
+### Volume 持久化策略
+
+三个关键目录挂载到宿主机：
+
+| 容器路径 | 宿主机路径 | 内容 |
+|---------|-----------|------|
+| `/root` | `./oc-xxx/root/` | agent 的 home（配置、workspace） |
+| `/home` | `./oc-xxx/home/` | jianjun 用户的 home |
+| `/usr/local` | `./oc-xxx/local/` | npm 全局包（node、openclaw 等） |
+
+这意味着 `docker compose down && up` 重建容器不丢任何数据。`/usr/local` 的挂载尤其重要——`npm i -g` 安装的所有东西都在宿主机上持久化了。
+
+### 固定 IP 网络
+
+`clawnet` 子网 `172.28.1.0/24`，每个 agent 固定 IP：
+
+- 飞马 (oc-pegasus): `172.28.1.11`
+- 匇泽 (oc-doctor): `172.28.1.12`
+
+方便容器间通信和调试。
+
+### 资源限制
+
+- 飞马: 2 CPU / 8GB — 主力 agent
+- 匇泽: 1 CPU / 4GB — 辅助 agent
+
+### Docker in Docker (DinD)
+
+镜像内装了 Docker，agent 可以在容器内操作 Docker。配合 `privileged` 模式工作。
+
+### 用户 jianjun
+
+非 root 用户，通过 `sudoers.d` 挂载获得 sudo 权限。`linger` 权限让 `loginctl` 会话在用户退出后保持——OpenClaw gateway 以该用户运行时需要这个。
