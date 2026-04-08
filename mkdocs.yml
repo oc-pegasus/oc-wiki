@@ -51,7 +51,9 @@ nav:
     - openclaw/never-break-your-own-config.md
   - 工具技巧:
     - tools/index.md
+    - tools/imagegen-openrouter.md
   - 开发经验:
     - dev/index.md
   - 概念理解:
     - concepts/index.md
+    - concepts/m2-delegation.md
