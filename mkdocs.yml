@@ -52,6 +52,7 @@ nav:
   - 工具技巧:
     - tools/index.md
     - tools/imagegen-openrouter.md
+    - tools/copilot-gateway-token-counting.md
   - 开发经验:
     - dev/index.md
   - 概念理解:
