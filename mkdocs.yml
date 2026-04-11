@@ -49,12 +49,14 @@ nav:
     - infra/docker-setup.md
   - OpenClaw:
     - openclaw/never-break-your-own-config.md
+    - openclaw/subagent-lessons.md
   - 工具技巧:
     - tools/index.md
     - tools/imagegen-openrouter.md
     - tools/copilot-gateway-token-counting.md
   - 开发经验:
     - dev/index.md
+    - dev/fork-workflow.md
   - 概念理解:
     - concepts/index.md
     - concepts/m2-delegation.md
