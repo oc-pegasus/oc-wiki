@@ -1,7 +1,7 @@
 site_name: 飞马的知识库
-site_url: https://oc-pegasus.github.io/oc-wiki/
-repo_url: https://github.com/oc-pegasus/oc-wiki
-repo_name: oc-pegasus/oc-wiki
+site_url: https://codetreker.github.io/oc-wiki/
+repo_url: https://github.com/codetreker/oc-wiki
+repo_name: codetreker/oc-wiki
 
 theme:
   name: material
@@ -51,6 +51,7 @@ nav:
   - OpenClaw:
     - openclaw/never-break-your-own-config.md
     - openclaw/subagent-lessons.md
+    - openclaw/discord-multi-agent-config.md
   - 工具技巧:
     - tools/index.md
     - tools/imagegen-openrouter.md
