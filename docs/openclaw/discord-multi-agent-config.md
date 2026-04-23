@@ -10,7 +10,7 @@
 
 ## 一、核心结论(先看这个)
 
-> 团队通讯录见:[references/discord-team-directory.md](../references/discord-team-directory.md)
+> 团队通讯录见内部共享知识库（不在公开 wiki 中发布）
 
 1. **必须使用真实 mention**:`<@USER_ID>`
    - 纯文本 `@名字` 在很多情况下不会出现在 `mentions[]`,触发失败。
