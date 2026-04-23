@@ -49,6 +49,7 @@ nav:
     - infra/docker-setup.md
     - infra/heartbeat-and-wakeup.md
   - OpenClaw:
+    - openclaw/acp-practical-guide.md
     - openclaw/never-break-your-own-config.md
     - openclaw/subagent-lessons.md
     - openclaw/discord-multi-agent-config.md
