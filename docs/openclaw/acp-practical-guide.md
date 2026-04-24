@@ -121,7 +121,7 @@ ACP 和 exec 调用 coding agent 时，**超时最少 15 分钟起步**。很多
 openclaw config set agents.defaults.heartbeat.target last
 
 # 2. exec 成功无输出也通知
-openclaw config set agents.defaults.exec.notifyOnExitEmptySuccess true
+openclaw config set tools.exec.notifyOnExitEmptySuccess true
 
 # 3. ACP 全权限
 openclaw config set plugins.entries.acpx.config.permissionMode approve-all
